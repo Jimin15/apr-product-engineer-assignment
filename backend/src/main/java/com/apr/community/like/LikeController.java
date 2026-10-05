@@ -10,7 +10,7 @@ import com.apr.community.like.dto.LikeResponse;
 
 @RestController
 @RequestMapping("/api/posts")
-public class LikeController {
+public class LikeController implements LikeApiDocs {
 
     private final LikeFacade likeFacade;
 
