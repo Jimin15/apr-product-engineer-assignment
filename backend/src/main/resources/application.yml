@@ -5,6 +5,13 @@ spring:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:15432/community}
     username: ${SPRING_DATASOURCE_USERNAME:community}
     password: ${SPRING_DATASOURCE_PASSWORD:community}
+  sql:
+    init:
+      mode: always
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
 
 server:
   port: 8080
