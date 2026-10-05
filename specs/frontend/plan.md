@@ -55,8 +55,9 @@ features/
 shared/
   api/       apiFetch(기본 URL · credentials · 선택 헤더) · ApiError(code · message · errors)
   ui/        Dialog · BottomSheet · ToastProvider / useToast · TopBar · NotFoundDialog · LoadError · icons/ (피그마 추출, F8)
-  lib/       time(상대 · 절대) · text(코드포인트 세기 · 자르기) · requester(getRequester) · avatar · goBack — React 무관 순수 함수만
-  hooks/     useInView(IntersectionObserver)
+  lib/       time(상대 · 절대) · text(코드포인트 세기 · 자르기) · requester(getRequester) · avatar — React 무관 순수 함수만
+             goBack(앱 안 이동 순번 기록 · 뒤로 가기 판단, 브라우저 history 사용)
+  hooks/     useInView(IntersectionObserver) · useRequester · useSingleFlight(중복 제출 잠금) · HistoryTracker
 ```
 
 - **`/dev-user` 외형을 바꾸지 않는다.** 375px 틀 · Provider · Tailwind는 `(community)` 그룹에만 적용하고, 루트 `layout.tsx` · `globals.css`는 건드리지 않는다.
@@ -99,9 +100,13 @@ README "상태 설계" 절의 근거.
   3. `inFlight`가 아니면 토글 요청. 응답으로 `confirmed` 갱신.
   4. `confirmed.isLiked !== desired`면 한 번 더 토글, 같으면 끝. 끝나면 상세 · 목록 캐시에 `confirmed`를 반영한다.
   5. 실패하면 상세를 다시 조회해 `confirmed` · `desired`를 서버 값으로 맞추고 토스트. 재조회가 404면 F-53.
-- **중복 제출 방지** — 요청이 진행 중이면 `작성 완료` · `수정 완료` · 댓글 전송 · 삭제 다이얼로그 `예` 버튼을 누를 수 없다 (mutation `isPending`).
-- **삭제된 글 감지 (F-25)** — 상세 조회뿐 아니라 댓글 목록 · 댓글 작성 · 댓글 삭제 · 좋아요 · 수정 저장 · 게시글 삭제에서 `POST_DELETED` · `POST_NOT_FOUND`를 받아도 같은 `NotFoundDialog`(F-53)를 띄운다 (보는 사이 다른 곳에서 삭제된 경우). 다이얼로그를 띄울 때 해당 게시글을 "없음" 상태로 표시해(상세 캐시 제거 + 화면 상태) 상세 내용 · 댓글 · 입력 바(수정 화면이면 폼)를 그리지 않고 상단 바만 남긴다 — 뒤에 삭제된 글이 비치지 않게.
+- **중복 제출 방지** — 요청이 진행 중이면 `작성 완료` · `수정 완료` · 댓글 전송 · 삭제 다이얼로그 `예` 버튼을 누를 수 없다. 버튼은 mutation `isPending`으로 비활성으로 그리고, 처리 자체는 `useSingleFlight`(ref 잠금, 요청이 끝나면 `onSettled`에서 해제)로 막는다.
+  - 이유 (구현 중 확인): `isPending`은 다시 그려진 뒤에야 버튼에 반영된다. TanStack Query의 상태 알림이 `setTimeout`으로 예약되므로, 화면 반영이 늦으면(백그라운드 탭 · 느린 기기) 두 번째 클릭이 통과해 같은 요청이 두 번 갔다 (게시글 삭제 DELETE 2회 재현).
+- **삭제된 글 감지 (F-25)** — 상세 조회뿐 아니라 댓글 목록 · 댓글 작성 · 댓글 삭제 · 좋아요 · 수정 저장 · 게시글 삭제에서 `POST_DELETED` · `POST_NOT_FOUND`를 받아도 같은 `NotFoundDialog`(F-53)를 띄운다 (보는 사이 다른 곳에서 삭제된 경우). 다이얼로그를 띄울 때 해당 게시글을 "없음" 상태로 표시해(상세 캐시 · 그 글의 댓글 캐시 제거 + 화면 상태) 상세 내용 · 댓글 · 입력 바(수정 화면이면 폼)를 그리지 않고 상단 바만 남긴다 — 뒤에 삭제된 글이 비치지 않게.
+  - 댓글 캐시도 지우는 이유 (구현 중 확인): 댓글 쿼리에 남은 `POST_DELETED` 오류를 다음 진입 때 보고 다시 "없는 글"로 판단했다.
 - **뒤로 가기 (F-08)** — 앱 안에서 이동해 온 기록이 있으면 `router.back()`, 주소로 직접 들어와 기록이 없으면 `/`로 이동 (`goBack`).
+  - "앱 안 기록"은 `HistoryTracker`가 주소가 바뀔 때마다 앱 안 순번(0 = 앱에 들어온 첫 화면)을 `history.state`에 적어 판단한다. 새 화면은 +1, `replaceRoute`로 바꾼 화면은 그대로, 뒤로 · 앞으로 가기는 적어 둔 순번을 읽는다.
+  - `history.length`를 쓰지 않는 이유 (구현 중 확인): 앱에 들어오기 전 기록(새 탭 페이지 · 다른 사이트)까지 세서, 주소로 직접 연 상세에서도 2 이상이 되어 앱 밖으로 나갔다.
 - **남의 글 수정 화면 (F-47)** — 수정 페이지는 상세 캐시(없으면 조회)로 먼저 작성자를 확인한다. 확인 중에는 폼 대신 상단 바 + `불러오는 중…`. 본인 글이면 `PostForm`, 남의 글이면 폼을 그리지 않고 `replace('/posts/{id}')` + 토스트 `다른 사람의 글은 수정할 수 없습니다.`, 404면 `NotFoundDialog`.
 - **서버 검증 오류 (F-45)** — `INVALID_INPUT`의 `errors`가 여러 개면 첫 번째 `message`를 토스트로 보여준다.
 - **불러오기 실패 (F-63)** — 목록 · 상세 · 댓글 쿼리가 첫 로딩에서 실패하면(`isError` · 데이터 없음) 그 자리에 `LoadError`(`불러오지 못했습니다.` + `다시 시도`)를 그리고, `다시 시도`는 해당 쿼리의 `refetch()`. 무한 스크롤 다음 묶음 실패(`isFetchNextPageError`)는 목록 아래에 같은 컴포넌트를 그리고 `fetchNextPage()`로 다시 시도한다. 404 `POST_DELETED` · `POST_NOT_FOUND`는 이 안내 대신 `NotFoundDialog`.
@@ -121,7 +126,7 @@ README "상태 설계" 절의 근거.
 | 동작 | 캐시 처리 | 이동 · 토스트 |
 | --- | --- | --- |
 | 게시글 작성 | 응답 Post를 목록 첫 페이지 맨 앞에 넣고(가장 최신이라 위치가 정확함) 목록 무효화 | `push('/')` + `게시글이 등록되었습니다.` |
-| 게시글 수정 | 응답으로 상세 캐시 교체, 목록 캐시의 해당 항목도 응답 값으로 교체, 목록 무효화 | `replace('/posts/{id}')` + `게시글이 수정되었습니다.` (뒤로 가기에 수정 화면이 남지 않음) |
+| 게시글 수정 | 응답으로 상세 캐시 교체, 목록 캐시의 해당 항목도 응답 값으로 교체, 목록 무효화 | 상세에서 들어왔으면 `router.back()`(원래 상세로), 주소로 직접 연 수정 화면이면 `replace('/posts/{id}')` + `게시글이 수정되었습니다.` (뒤로 가기에 수정 화면이 남지 않음. `replace`만 쓰면 기록에 상세가 두 번 쌓여 뒤로 가기를 한 번 더 눌러야 했다) |
 | 게시글 삭제 | 상세 캐시 제거, 목록 캐시에서 해당 항목 즉시 제거, 목록 무효화 | `replace('/')` + `게시글이 삭제되었습니다.` |
 | 좋아요 | 상세 캐시 · 목록 캐시의 해당 항목을 `setQueryData`로 갱신 (`useLikeToggle`) | 실패 시 상세 재조회 + 토스트 |
 | 댓글 작성 | 상세 · 목록 캐시의 `commentCount` +1, 댓글 쿼리 무효화(새 댓글이 맨 위), 상세 · 목록 무효화 | 입력창 비우고 `blur()` (키보드 닫기) |
