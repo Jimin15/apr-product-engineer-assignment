@@ -22,7 +22,7 @@ import com.apr.community.post.dto.PostResponse;
 
 @RestController
 @RequestMapping("/api/posts")
-public class PostController {
+public class PostController implements PostApiDocs {
 
     private final PostService postService;
 

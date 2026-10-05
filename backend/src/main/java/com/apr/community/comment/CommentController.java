@@ -21,7 +21,7 @@ import com.apr.community.common.user.CurrentUser;
 
 @RestController
 @RequestMapping("/api")
-public class CommentController {
+public class CommentController implements CommentApiDocs {
 
     private final CommentService commentService;
 
