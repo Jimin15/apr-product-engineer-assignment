@@ -41,7 +41,8 @@ app/
   globals.css                스타터 그대로 (Pretendard)
   dev-user/                  스타터 그대로 (수정 금지)
   (community)/               괄호 폴더 = 주소에 나타나지 않는 Route Group
-    layout.tsx               QueryClientProvider · ToastProvider · 375px 가운데 틀 (F-01) · community.css 불러오기
+    layout.tsx               서버 컴포넌트: <Providers>로 감싸고 375px 가운데 틀 (F-01) · community.css 불러오기
+    providers.tsx            "use client": QueryClient를 useState로 한 번만 생성 → QueryClientProvider · ToastProvider
     community.css            @import "tailwindcss" + @theme 토큰 (F3)
     page.tsx                 목록 (/)
     posts/[id]/page.tsx      상세
@@ -54,14 +55,16 @@ features/
 shared/
   api/       apiFetch(기본 URL · credentials · 선택 헤더) · ApiError(code · message · errors)
   ui/        Dialog · BottomSheet · ToastProvider / useToast · TopBar · NotFoundDialog · LoadError · icons/ (피그마 추출, F8)
-  lib/       time(상대 · 절대) · text(코드포인트 세기 · 자르기) · requester(getRequester) · avatar · useInView · goBack
+  lib/       time(상대 · 절대) · text(코드포인트 세기 · 자르기) · requester(getRequester) · avatar · goBack — React 무관 순수 함수만
+  hooks/     useInView(IntersectionObserver)
 ```
 
 - **`/dev-user` 외형을 바꾸지 않는다.** 375px 틀 · Provider · Tailwind는 `(community)` 그룹에만 적용하고, 루트 `layout.tsx` · `globals.css`는 건드리지 않는다.
   Tailwind를 루트 CSS에 넣으면 기본 초기화(preflight)가 `/dev-user`의 제목 · 문단 여백 등을 바꾸기 때문이다. `/dev-user`는 주소로 직접 열리거나 새로 불러와지므로 그룹의 CSS가 섞이지 않는다.
 - 페이지는 데이터를 직접 다루지 않고 `features` 컴포넌트를 조립만 한다.
 - 기능 간 참조는 공개된 쿼리 키 · hook으로만 한다 (예: 댓글 작성 후 `posts`의 쿼리 키로 무효화).
-- `shared/lib`은 React에 의존하지 않는 순수 함수 위주로 두고 Vitest 대상으로 삼는다 (F10). `useInView`만 예외.
+- `shared/lib`은 React에 의존하지 않는 순수 함수만 두고 Vitest 대상으로 삼는다 (F10). hook은 `shared/hooks` · 각 기능 폴더에 둔다.
+- **Provider는 클라이언트 컴포넌트로 분리한다.** `layout.tsx`는 기본이 서버 컴포넌트라 Context Provider를 직접 쓸 수 없다. `providers.tsx`(`"use client"`)에서 `const [queryClient] = useState(() => new QueryClient(기본값))`로 만들어, 렌더링마다 캐시가 새로 생기지 않게 한다.
 
 ## 상태 설계
 
@@ -83,18 +86,21 @@ README "상태 설계" 절의 근거.
   - 쿠키 읽기(`getRequester()`) · 본인 판단 · 상대 시간 계산은 브라우저에서 데이터를 받은 뒤에만 한다. 쿼리는 서버에서 실행되지 않으므로 데이터가 있는 화면은 브라우저에서만 그려진다.
 - **API 주소** — 브라우저 코드는 `NEXT_PUBLIC_API_BASE_URL`만 쓴다. 주소를 코드에 직접 적지 않는다. 로컬 `next dev`용으로 `frontend/.env.development`에 `NEXT_PUBLIC_API_BASE_URL=http://localhost:8080/api`를 둔다 (`next dev`에서만 읽히고 Docker 빌드에는 영향 없음). `apiFetch`는 값이 없으면 분명한 오류를 낸다.
 - **제목 글자 수 (F-42 · P-42)** — 입력값 그대로의 코드포인트(`[...title].length`)로 세고 20에서 자른다. `N / 20`도 같은 값이다. 서버는 trim 후 20 이하를 보므로 입력값이 20 이하면 항상 통과한다. HTML `maxLength`는 UTF-16 단위라 쓰지 않는다.
+  - 코드포인트 단위로 자르므로 UTF-16 반쪽(깨진 글자)은 생기지 않는다. 단 여러 코드포인트로 된 이모지(`🙏🏻` · ZWJ 이모지)는 20번째 경계에 걸리면 중간에서 잘려 모양이 바뀔 수 있다 — 코드포인트 기준(D2)을 지키는 대가로 받아들인다.
   - 한글 조합 중(`compositionstart` ~ `compositionend`)에는 자르지 않고, 조합이 끝난 뒤 자른다. 붙여넣기로 넘친 경우도 같은 방식으로 자른다.
   - 빈 값 판단(완료 버튼 활성)은 `trim()` 기준 (P-41).
 - **상대 시간 (F-12)** — 구간표대로 일 단위 내림. 미래 시각은 `방금 전`.
 - **절대 날짜 (F-20 · F-33)** — `YY.MM.DD`, `Asia/Seoul` (F7). `formatToParts()`로 조립 (예: `2026-08-30T15:30:00Z` → `26.08.31`, 한국 시간으로 날짜가 바뀌는 경계). Vitest로 이 경계와 형식(공백 · 끝 마침표 없음)을 고정한다.
 - **좋아요 (F-21)** — 게시글별로 `desired`(마지막으로 누른 상태) · `confirmed`(서버가 확인한 상태) · `inFlight`를 둔다.
-  1. 누르면 `desired`를 뒤집고 화면은 `desired` 기준으로 즉시 그린다 (숫자는 `confirmed.likeCount`에 `desired`와 `confirmed.isLiked`의 차이만큼 ±1).
+  1. 누르면 `desired`를 뒤집고 화면은 `desired` 기준으로 즉시 그린다.
+     - 아이콘: `desired`
+     - 숫자: `confirmed.likeCount + (desired === confirmed.isLiked ? 0 : desired ? 1 : -1)` — 서버가 확인한 숫자에 "확인된 상태와 원하는 상태가 다를 때만" ±1. 그 사이 다른 사용자의 좋아요는 응답의 `likeCount`로 반영된다
   2. 토글을 시작할 때 해당 상세 쿼리의 진행 중 재조회를 `cancelQueries`로 멈춘다. 진행 중에는 재조회 결과가 화면의 `desired`를 덮지 않게 한다.
   3. `inFlight`가 아니면 토글 요청. 응답으로 `confirmed` 갱신.
   4. `confirmed.isLiked !== desired`면 한 번 더 토글, 같으면 끝. 끝나면 상세 · 목록 캐시에 `confirmed`를 반영한다.
   5. 실패하면 상세를 다시 조회해 `confirmed` · `desired`를 서버 값으로 맞추고 토스트. 재조회가 404면 F-53.
 - **중복 제출 방지** — 요청이 진행 중이면 `작성 완료` · `수정 완료` · 댓글 전송 · 삭제 다이얼로그 `예` 버튼을 누를 수 없다 (mutation `isPending`).
-- **삭제된 글 감지 (F-25)** — 상세 조회뿐 아니라 댓글 목록 · 댓글 작성 · 댓글 삭제 · 좋아요 · 수정 저장 · 게시글 삭제에서 `POST_DELETED` · `POST_NOT_FOUND`를 받아도 같은 `NotFoundDialog`(F-53)를 띄운다 (보는 사이 다른 곳에서 삭제된 경우).
+- **삭제된 글 감지 (F-25)** — 상세 조회뿐 아니라 댓글 목록 · 댓글 작성 · 댓글 삭제 · 좋아요 · 수정 저장 · 게시글 삭제에서 `POST_DELETED` · `POST_NOT_FOUND`를 받아도 같은 `NotFoundDialog`(F-53)를 띄운다 (보는 사이 다른 곳에서 삭제된 경우). 다이얼로그를 띄울 때 해당 게시글을 "없음" 상태로 표시해(상세 캐시 제거 + 화면 상태) 상세 내용 · 댓글 · 입력 바(수정 화면이면 폼)를 그리지 않고 상단 바만 남긴다 — 뒤에 삭제된 글이 비치지 않게.
 - **뒤로 가기 (F-08)** — 앱 안에서 이동해 온 기록이 있으면 `router.back()`, 주소로 직접 들어와 기록이 없으면 `/`로 이동 (`goBack`).
 - **남의 글 수정 화면 (F-47)** — 수정 페이지는 상세 캐시(없으면 조회)로 먼저 작성자를 확인한다. 확인 중에는 폼 대신 상단 바 + `불러오는 중…`. 본인 글이면 `PostForm`, 남의 글이면 폼을 그리지 않고 `replace('/posts/{id}')` + 토스트 `다른 사람의 글은 수정할 수 없습니다.`, 404면 `NotFoundDialog`.
 - **서버 검증 오류 (F-45)** — `INVALID_INPUT`의 `errors`가 여러 개면 첫 번째 `message`를 토스트로 보여준다.
@@ -123,6 +129,7 @@ README "상태 설계" 절의 근거.
 
 - **즉시 반영 → 무효화 순서** (F-09). 화면에 없는 쿼리는 무효화해도 바로 다시 받지 않고, 다시 그려질 때 캐시의 옛 값을 먼저 보여준 뒤 재조회한다. 그래서 변경 결과를 `setQueryData`로 캐시에 먼저 반영해 옛 값(삭제한 글 · 옛 제목 · 옛 숫자)이 잠깐 보이는 일을 막고, 무효화로 서버와 최종 정합을 맞춘다.
 - 무한 목록은 무효화 시 불러온 페이지를 커서 순서대로 통째로 다시 받으므로, 맨 앞에 넣은 새 글이 중복되지 않는다.
+- **작성 시 첫 페이지가 잠깐 21개가 되는 것은 의도된 상태다.** 커서는 위치(offset)가 아니라 "직전 페이지 마지막 글의 `(createdAt, id)`"라서, 맨 앞에 넣어도 이미 받은 2번째 페이지(원래 20번째 글 다음부터)와 빠지거나 겹치는 글이 없다. 페이지당 20개로 맞추려고 첫 페이지 끝을 **자르지 않는다** — 잘린 글은 2번째 페이지에도 없어 재조회 전까지 사라진다. 재조회는 1페이지부터 순차로 받고 다음 커서를 새 페이지 기준으로 다시 계산하므로(TanStack Query v5 무한 쿼리) 정상 구성으로 돌아간다.
 
 ## spec 대응
 
@@ -134,7 +141,7 @@ README "상태 설계" 절의 근거.
 | F-07 아바타 | `shared/lib/avatar` |
 | F-08 뒤로 가기 | `TopBar`의 화살표 → `goBack` (작성 · 수정은 F-46 확인 후) |
 | F-09 변경 반영 | 위 "캐시 갱신" 표 |
-| F-10 · F-15 목록 무한 스크롤 | `['posts','list']` infinite + 목록 끝 sentinel을 `useInView`(IntersectionObserver)로 감지해 `fetchNextPage` |
+| F-10 · F-15 목록 무한 스크롤 | `['posts','list']` infinite + 목록 끝 sentinel을 `shared/hooks/useInView`(IntersectionObserver)로 감지해 `fetchNextPage` |
 | F-11 · F-12 목록 항목 · 상대 시간 | `PostListItem`, `shared/lib/time` |
 | F-13 · F-14 작성 버튼 · 항목 클릭 | `next/link` |
 | F-16 상단 바 | `TopBar` (오른쪽 비움) |
