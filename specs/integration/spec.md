@@ -109,7 +109,7 @@ Frontend ↔ Backend 연결과 실행 환경에 대한 요구사항 (WHAT).
 
 | 경우 | 상태 | `code` |
 | --- | --- | --- |
-| 본문 검증 실패 (필수 누락 · 공백만 · 제목 20자 초과 · JSON 형식 오류) | 400 | `INVALID_INPUT` |
+| 본문 검증 실패 (필수 누락 · 공백만 · 제목 20자 초과 · JSON 형식 오류) · 경로 변수 형식 오류(`/posts/abc`) · 디코딩할 수 없는 `x-user-id` 쿠키 | 400 | `INVALID_INPUT` |
 | `size` · `cursorCreatedAt` · `cursorId` 값이 잘못됨 | 400 | `INVALID_QUERY` |
 | 요청자 헤더 · 쿠키 불일치 | 400 | `USER_ID_MISMATCH` |
 | 남의 게시글 · 댓글 수정 · 삭제 | 403 | `NOT_OWNER` |
